@@ -31,47 +31,43 @@ waitForMsgType(self, 'wasm_bindgen_worker_init').then(async data => {
   const pkg = await import(data.mainJS);
   await pkg.default(data.module, data.memory);
   postMessage({ type: 'wasm_bindgen_worker_ready' });
-  pkg.wbg_rayon_start_worker(data.receiver);
+  pkg.wbg_rayon_start_worker(data.receiver, data.shareObject, data.objSender);
 });
 
-// Note: this is never used, but necessary to prevent a bug in Firefox
-// (https://bugzilla.mozilla.org/show_bug.cgi?id=1702191) where it collects
-// Web Workers that have a shared WebAssembly memory with the main thread,
-// but are not explicitly rooted via a `Worker` instance.
-//
-// By storing them in a variable, we can keep `Worker` objects around and
-// prevent them from getting GC-d.
-let _workers;
-
-export async function startWorkers(module, memory, builder) {
-  if (builder.numThreads() === 0) {
-    throw new Error(`num_threads must be > 0.`);
-  }
+export async function startWorkers(module, memory, mainJS, length, receiver, shareObject, objSenders) {
 
   const workerInit = {
     type: 'wasm_bindgen_worker_init',
     module,
     memory,
-    receiver: builder.receiver(),
-    mainJS: builder.mainJS()
+    receiver,
+    mainJS,
+    shareObject,
   };
 
-  _workers = await Promise.all(
-    Array.from({ length: builder.numThreads() }, async () => {
+  const workers = await Promise.all(
+    Array.from({ length }, async (_, i) => {
       // Self-spawn into a new Worker.
       // The script is fetched as a blob so it works even if this script is
       // hosted remotely (e.g. on a CDN). This avoids a cross-origin
       // security error.
       let scriptBlob = await fetch(import.meta.url).then(r => r.blob());
+
       let url = URL.createObjectURL(scriptBlob);
       const worker = new Worker(url, {
-        type: 'module'
+        type: 'module',
       });
+      workerInit["objSender"] = objSenders[i];
       worker.postMessage(workerInit);
       await waitForMsgType(worker, 'wasm_bindgen_worker_ready');
       URL.revokeObjectURL(url);
       return worker;
     })
   );
-  builder.build();
+
+  return workers;
+}
+
+export const wasmAddr = (addr) => {
+  return addr
 }

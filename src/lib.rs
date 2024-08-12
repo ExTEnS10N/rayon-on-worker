@@ -11,136 +11,167 @@
  * limitations under the License.
  */
 
-#![doc = include_str!("../README.md")]
+ #![doc = include_str!("../README.md")]
 
-// Note: `atomics` is whitelisted in `target_feature` detection, but `bulk-memory` isn't,
-// so we can check only presence of the former. This should be enough to catch most common
-// mistake (forgetting to pass `RUSTFLAGS` altogether).
-#[cfg(all(not(doc), not(target_feature = "atomics")))]
-compile_error!("Did you forget to enable `atomics` and `bulk-memory` features as outlined in wasm-bindgen-rayon README?");
-
-use crossbeam_channel::{bounded, Receiver, Sender};
-use js_sys::Promise;
-use rayon::{ThreadBuilder, ThreadPoolBuilder};
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsValue;
-
-#[cfg(feature = "no-bundler")]
-use js_sys::JsString;
-
-// Naming is a workaround for https://github.com/rustwasm/wasm-bindgen/issues/2429
-// and https://github.com/rustwasm/wasm-bindgen/issues/1762.
-#[allow(non_camel_case_types)]
-#[wasm_bindgen]
-#[doc(hidden)]
-pub struct wbg_rayon_PoolBuilder {
-    num_threads: usize,
-    sender: Sender<ThreadBuilder>,
-    receiver: Receiver<ThreadBuilder>,
-}
-
-#[cfg_attr(
-    not(feature = "no-bundler"),
-    wasm_bindgen(module = "/src/workerHelpers.js")
-)]
-#[cfg_attr(
-    feature = "no-bundler",
-    wasm_bindgen(module = "/src/workerHelpers.no-bundler.js")
-)]
-extern "C" {
-    #[wasm_bindgen(js_name = startWorkers)]
-    fn start_workers(module: JsValue, memory: JsValue, builder: wbg_rayon_PoolBuilder) -> Promise;
-}
-
-#[cfg(not(feature = "no-bundler"))]
-fn _ensure_worker_emitted() {
-    // Just ensure that the worker is emitted into the output folder, but don't actually use the URL.
-    wasm_bindgen::link_to!(module = "/src/workerHelpers.worker.js");
-}
-
-#[wasm_bindgen]
-impl wbg_rayon_PoolBuilder {
-    fn new(num_threads: usize) -> Self {
-        let (sender, receiver) = bounded(num_threads);
-        Self {
-            num_threads,
-            sender,
-            receiver,
-        }
-    }
-
-    #[cfg(feature = "no-bundler")]
-    #[wasm_bindgen(js_name = mainJS)]
-    pub fn main_js(&self) -> JsString {
-        #[wasm_bindgen]
-        extern "C" {
-            #[wasm_bindgen(js_namespace = ["import", "meta"], js_name = url)]
-            static URL: JsString;
-        }
-
-        URL.clone()
-    }
-
-    #[wasm_bindgen(js_name = numThreads)]
-    pub fn num_threads(&self) -> usize {
-        self.num_threads
-    }
-
-    pub fn receiver(&self) -> *const Receiver<ThreadBuilder> {
-        &self.receiver
-    }
-
-    // This should be called by the JS side once all the Workers are spawned.
-    // Important: it must take `self` by reference, otherwise
-    // `start_worker_thread` will try to receive a message on a moved value.
-    pub fn build(&mut self) {
-        ThreadPoolBuilder::new()
-            .num_threads(self.num_threads)
-            // We could use postMessage here instead of Rust channels,
-            // but currently we can't due to a Chrome bug that will cause
-            // the main thread to lock up before it even sends the message:
-            // https://bugs.chromium.org/p/chromium/issues/detail?id=1075645
-            .spawn_handler(move |thread| {
-                // Note: `send` will return an error if there are no receivers.
-                // We can use it because all the threads are spawned and ready to accept
-                // messages by the time we call `build()` to instantiate spawn handler.
-                self.sender.send(thread).unwrap_throw();
-                Ok(())
-            })
-            .build_global()
-            .unwrap_throw();
-    }
-}
-
-#[wasm_bindgen(js_name = initThreadPool)]
-#[doc(hidden)]
-pub fn init_thread_pool(num_threads: usize) -> Promise {
-    start_workers(
-        wasm_bindgen::module(),
-        wasm_bindgen::memory(),
-        wbg_rayon_PoolBuilder::new(num_threads),
-    )
-}
-
-#[wasm_bindgen]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-#[doc(hidden)]
-pub fn wbg_rayon_start_worker(receiver: *const Receiver<ThreadBuilder>)
-where
-    // Statically assert that it's safe to accept `Receiver` from another thread.
-    Receiver<ThreadBuilder>: Sync,
-{
-    // This is safe, because we know it came from a reference to PoolBuilder,
-    // allocated on the heap by wasm-bindgen and dropped only once all the
-    // threads are running.
-    //
-    // The only way to violate safety is if someone externally calls
-    // `exports.wbg_rayon_start_worker(garbageValue)`, but then no Rust tools
-    // would prevent us from issues anyway.
-    let receiver = unsafe { &*receiver };
-    // Wait for a task (`ThreadBuilder`) on the channel, and, once received,
-    // start executing it.
-    //
-    // On practice this will start running Rayon's internal event loop.
-    receiver.recv().unwrap_throw().run()
-}
+ // Note: `atomics` is whitelisted in `target_feature` detection, but `bulk-memory` isn't,
+ // so we can check only presence of the former. This should be enough to catch most common
+ // mistake (forgetting to pass `RUSTFLAGS` altogether).
+ #[cfg(all(not(doc), not(target_feature = "atomics")))]
+ compile_error!("Did you forget to enable `atomics` and `bulk-memory` features as outlined in rayon-on-worker README?");
+ 
+ use crossbeam_channel::RecvError;
+ use crossbeam_channel::{bounded, Receiver, Sender};
+ use js_sys::Promise;
+ use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder};
+ use wasm_bindgen::prelude::*;
+ use wasm_bindgen::JsValue;
+ 
+ #[cfg_attr(
+     not(feature = "no-bundler"),
+     wasm_bindgen(module = "/src/workerHelpers.js")
+ )]
+ #[cfg_attr(
+     feature = "no-bundler",
+     wasm_bindgen(module = "/src/workerHelpers.no-bundler.js")
+ )]
+ extern "C" {
+     #[wasm_bindgen(js_name = startWorkers)]
+     async fn start_workers(
+         module: JsValue, memory: JsValue,
+         url: &str, num_workers: usize,
+         receiver: *const Receiver<ThreadBuilder>,
+         share_object: &JsValue, obj_senders: &js_sys::Array
+     ) -> JsValue;
+ 
+     #[wasm_bindgen(js_name = wasmAddr)]
+     pub fn wasm_addr_s(sender: *const Sender<JsValue>) -> JsValue;
+ }
+ 
+ #[wasm_bindgen]
+ extern "C" {
+     #[wasm_bindgen(js_namespace = ["import", "meta"], js_name = url)]
+     static MAIN_JS_URL: String;
+ }
+ 
+ #[cfg(not(feature = "no-bundler"))]
+ fn _ensure_worker_emitted() {
+     // Just ensure that the worker is emitted into the output folder, but don't actually use the URL.
+     wasm_bindgen::link_to!(module = "/src/workerHelpers.worker.js");
+ }
+ 
+ pub struct WebWorkersBuilder {
+     object: JsValue,
+     num_workers: usize,
+     sender: Option<Sender<ThreadBuilder>>,
+     receiver: Option<Receiver<ThreadBuilder>>,
+     obj_senders: Vec<Sender<JsValue>>,
+     obj_receivers: Vec<WasmReceiver>
+ }
+ 
+ impl WebWorkersBuilder {
+     pub fn new() -> Self {
+         WebWorkersBuilder { 
+             object: JsValue::undefined(), num_workers: 1,
+             sender: None, receiver: None,
+             obj_senders: vec![], obj_receivers: vec![]
+         }
+     }
+ 
+     /// set how many workers to build
+     /// ### Panic
+     /// ```
+     /// assert_ne!(num_workers, 0);
+     /// ```
+     pub fn num_workers(mut self, num_workers: usize) -> Self {
+         assert_ne!(num_workers, 0);
+         self.num_workers = num_workers;
+         self
+     }
+ 
+     pub fn share(mut self, object: JsValue) -> Self{
+         self.object = object;
+         self
+     }
+ 
+     pub fn receivers(&mut self) -> &mut Vec<WasmReceiver> {
+         &mut self.obj_receivers
+     }
+ 
+     pub async fn build(&mut self) -> JsValue {
+         let (sender, receiver) = bounded(self.num_workers);
+         self.sender = Some(sender);
+         self.receiver = Some(receiver);
+ 
+         let array = js_sys::Array::new();
+         for _ in 0..self.num_workers {
+             let (obj_sender, obj_receiver) = bounded(1);
+             let obj_sender_addr: *const Sender<JsValue> = &obj_sender;
+             array.push(&wasm_addr_s(obj_sender_addr));
+             self.obj_senders.push(obj_sender);
+             self.obj_receivers.push(WasmReceiver::new(obj_receiver));
+         }
+         start_workers(
+             wasm_bindgen::module(), wasm_bindgen::memory(),
+             &MAIN_JS_URL.clone(), self.num_workers,
+             self.receiver.as_ref().unwrap(),
+             &self.object, &array
+         ).await
+     }
+ }
+ 
+ pub struct WasmReceiver {
+     receiver: Receiver<JsValue>
+ }
+ impl WasmReceiver {
+     fn new(receiver: Receiver<JsValue>) -> Self {
+         WasmReceiver { receiver }
+     }
+ 
+     pub fn recv(&self) -> Result<JsValue, RecvError> {
+         self.receiver.recv()
+     }
+ }
+ unsafe impl Send for WasmReceiver {}
+ 
+ pub trait WebPoolBuildable {
+     fn build_on_workers(self, builder: &mut WebWorkersBuilder) -> Result<ThreadPool, ThreadPoolBuildError>;
+ }
+ 
+ impl WebPoolBuildable for ThreadPoolBuilder {
+     fn build_on_workers(self, builder: &mut WebWorkersBuilder) -> Result<ThreadPool, ThreadPoolBuildError> {
+         self.num_threads(builder.num_workers).spawn_handler(move |thread| {
+             builder.sender.as_ref().unwrap().send(thread).unwrap_throw();
+             Ok(())
+         }).build()
+     }
+ }
+ 
+ 
+ #[wasm_bindgen]
+ #[allow(clippy::not_unsafe_ptr_arg_deref)]
+ #[doc(hidden)]
+ pub fn wbg_rayon_start_worker(
+     receiver: *const Receiver<ThreadBuilder>,
+     object: JsValue, obj_sender: *const Sender<JsValue>
+ )
+ where
+     // Statically assert that it's safe to accept `Receiver` from another thread.
+     Receiver<ThreadBuilder>: Sync,
+ {
+     let obj_sender = unsafe { &*obj_sender };
+     obj_sender.send(object).unwrap();
+     // This is safe, because we know it came from a reference to PoolBuilder,
+     // allocated on the heap by wasm-bindgen and dropped only once all the
+     // threads are running.
+     //
+     // The only way to violate safety is if someone externally calls
+     // `exports.wbg_rayon_start_worker(garbageValue)`, but then no Rust tools
+     // would prevent us from issues anyway.
+     let receiver = unsafe { &*receiver };
+     // Wait for a task (`ThreadBuilder`) on the channel, and, once received,
+     // start executing it.
+     //
+     // On practice this will start running Rayon's internal event loop.
+     receiver.recv().unwrap_throw().run()
+ }
+ 

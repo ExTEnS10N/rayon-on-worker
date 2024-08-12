@@ -1,4 +1,4 @@
-This is a test project for wasm-bindgen-rayon that ensures that Rayon integration works end-to-end in a browser.
+This is a test project for rayon-on-worker that ensures that Rayon integration works end-to-end in a browser.
 
 It's built in several variants:
 

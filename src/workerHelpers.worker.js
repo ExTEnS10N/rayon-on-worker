@@ -12,7 +12,7 @@
  */
 
 // Note: our JS should have been generated in
-// `[out-dir]/snippets/wasm-bindgen-rayon-[hash]/workerHelpers.worker.js`,
+// `[out-dir]/snippets/rayon-on-worker-[hash]/workerHelpers.worker.js`,
 // resolve the main module via `../../..`.
 //
 // This might need updating if the generated structure changes on wasm-bindgen
@@ -21,8 +21,8 @@
 // and temporary bugs so that you don't need to deal with them in your code.
 import initWbg, { wbg_rayon_start_worker } from '../../../';
 
-onmessage = async ({ data: { module, memory, receiver } }) => {
+onmessage = async ({ data: { module, memory, receiver, shareObject, objSender } }) => {
   await initWbg(module, memory);
   postMessage(true);
-  wbg_rayon_start_worker(receiver);
+  wbg_rayon_start_worker(receiver, shareObject, objSender);
 };

@@ -1,5 +1,5 @@
 [package]
-name = "wasm-bindgen-rayon-test"
+name = "rayon-on-worker-test"
 version = "0.1.0"
 authors = ["Ingvar Stepanyan <me@rreverser.com>"]
 edition = "2018"
@@ -9,6 +9,6 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-bindgen-rayon = { path = ".." }
+rayon-on-worker = { path = ".." }
 wasm-bindgen = { workspace = true }
 rayon = { workspace = true }

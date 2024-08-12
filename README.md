@@ -1,4 +1,24 @@
-`wasm-bindgen-rayon` is an adapter for enabling [Rayon](https://github.com/rayon-rs/rayon)-based concurrency on the Web with WebAssembly (via [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen), Web Workers and SharedArrayBuffer support).
+# Why the fork?
+In origin crate wasm-bindgen-rayon, once you call init_thread_pool(), the rayon thread pool will be built globally, without any customization allowed,
+I can not postMessage to those workers since the rayon run loop will never stop and the global pool will nerver drop. 
+
+Whenever I need to send some JS Object across thread, it is just impossible, since those objects can only be sent via postMessage and not SharedArrayBuffer.
+
+Using the origin wasm-bindgen-rayon will totally limits the whole application function to some specific scenes that we can only do cpu calculations, and other types of multithread tasks will become impossible to run.
+
+So here goes the fork, which aims to let me use the rayon as flexible as it originally is.
+
+# Statements
+
+- Due to personally lack of time, I won't make any pull request, nor publish to crates.io.
+
+- **As if it works for me, everything is ok!**
+
+- All codes written by me are released to public domain.
+
+# Overview
+
+`rayon-on-worker` is an adapter for enabling [Rayon](https://github.com/rayon-rs/rayon)-based concurrency on the Web with WebAssembly (via [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen), Web Workers and SharedArrayBuffer support).
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
@@ -7,6 +27,7 @@
 - [Usage](#usage)
   - [Setting up](#setting-up)
   - [Using Rayon](#using-rayon)
+  - [Send Special JsValue Across threads](#send-special-jsvalue-across-threads)
   - [Building Rust code](#building-rust-code)
     - [Using config files](#using-config-files)
     - [Using command-line params](#using-command-line-params)
@@ -22,9 +43,7 @@
 
 # Usage
 
-WebAssembly thread support is not yet a first-class citizen in Rust - it's still only available in nightly - so there are a few things to keep in mind when using this crate. Bear with me :)
-
-For a quick demo, check out [this Mandelbrot fractal generator](https://rreverser.com/wasm-bindgen-rayon-demo/):
+WebAssembly thread support is not yet a first-class citizen in Rust - it's still only available in nightly - so there are a few things to keep in mind when using this crate.
 
 <table width="100%">
   <tr>
@@ -35,7 +54,7 @@ For a quick demo, check out [this Mandelbrot fractal generator](https://rreverse
   </td>
   <td width="50%">
 
-![Drawn using all available threads via wasm-bindgen-rayon: 87ms](https://github.com/RReverser/wasm-bindgen-rayon/assets/557590/db32a88a-0e77-4974-94fc-1b993030ca92)
+![Drawn using all available threads via rayon-on-worker: 87ms](https://github.com/RReverser/wasm-bindgen-rayon/assets/557590/db32a88a-0e77-4974-94fc-1b993030ca92)
     
   </td>
   </tr>
@@ -51,32 +70,18 @@ Then, add `wasm-bindgen`, `rayon`, and this crate as dependencies to your `Cargo
 [dependencies]
 wasm-bindgen = "0.2"
 rayon = "1.8"
-wasm-bindgen-rayon = "1.2"
+wasm-bindgen-futures = "0.4.42"
+rayon-on-worker = { path = "path/to/rayon-on-worker" }
 ```
 
 Then, reexport the `init_thread_pool` function:
 
 ```rust
-pub use wasm_bindgen_rayon::init_thread_pool;
-
-// ...
-```
-
-This will expose an async `initThreadPool` function in the final generated JavaScript for your library.
-
-You'll need to invoke it right after instantiating your module on the main thread in order to prepare the threadpool before calling into actual library functions:
-
-```js
-import init, { initThreadPool /* ... */ } from './pkg/index.js';
-
-// Regular wasm-bindgen initialization.
-await init();
-
-// Thread pool initialization with the given number of threads
-// (pass `navigator.hardwareConcurrency` if you want to use all cores).
-await initThreadPool(navigator.hardwareConcurrency);
-
-// ...now you can invoke any exported functions as you normally would
+let mut workers_builder = WebWorkersBuilder::new()
+  .num_workers(16);
+let _workers = workers_builder.build().await;
+let pool = ThreadPoolBuilder::new()
+    .build_on_workers(&mut workers_builder).unwrap_throw();
 ```
 
 ## Using Rayon
@@ -91,6 +96,32 @@ pub fn sum(numbers: &[i32]) -> i32 {
 ```
 
 will accept an `Int32Array` from JavaScript side and calculate the sum of its values using all available threads.
+
+## Send Special JsValue Across threads
+Some Javascript objects are impossible be sent across thread through SharedArrayBuffer, for example, a File selected by user:
+
+```rust
+let file: web_sys::File = user_select().await;
+let num_workers = 16;
+let mut workers_builder = WebWorkersBuilder::new()
+  .num_workers(num_workers)
+  .share(file.slice().into());
+let _workers = workers_builder.build().await;
+let pool = ThreadPoolBuilder::new()
+    .build_on_workers(&mut workers_builder).unwrap_throw();
+
+let receivers = workers_builder.object_receivers();
+for _ in 0..num_workers{
+  let receiver = receivers.pop().unwrap();
+  pool.spawn(move || {
+    let file: JsValue = receiver.recv().unwrap();
+    // Now do whatever you need to multihreading processing the file.
+  }
+}
+
+// You need to make sure your pool isn't dropped
+// before all jobs done yourself. 
+```
 
 ## Building Rust code
 
@@ -151,7 +182,7 @@ It looks a bit scary, but it takes care of everything - choosing the nightly too
 
 WebAssembly threads use Web Workers under the hood for instantiating other threads with the same WebAssembly module & memory.
 
-wasm-bindgen-rayon provides the required JS code for those Workers internally, and [uses a syntax that is recognised across various bundlers](https://web.dev/bundling-non-js-resources/).
+rayon-on-worker provides the required JS code for those Workers internally, and [uses a syntax that is recognised across various bundlers](https://web.dev/bundling-non-js-resources/).
 
 ### Usage with Webpack
 
@@ -171,10 +202,10 @@ Alternatively, you can use [Vite](https://vitejs.dev/) which has necessary plugi
 
 The default JS glue was designed in a way that works great with bundlers and code-splitting, but, sadly, not in browsers due to different treatment of import paths (see [`WICG/import-maps#244`](https://github.com/WICG/import-maps/issues/244)).
 
-If you want to build this library for usage without bundlers, enable the `no-bundler` feature for `wasm-bindgen-rayon` in your `Cargo.toml`:
+If you want to build this library for usage without bundlers, enable the `no-bundler` feature for `rayon-on-worker` in your `Cargo.toml`:
 
 ```toml
-wasm-bindgen-rayon = { version = "1.2", features = ["no-bundler"] }
+rayon-on-worker = { path = "path/to/rayon-on-worker", features = ["no-bundler"] }
 ```
 
 ## Feature detection
@@ -202,4 +233,6 @@ wasmPkg.nowCallAnyExportedFuncs();
 
 # License
 
-This crate is licensed under the Apache-2.0 license.
+As a forked repository, using everything from the origin repo must follow their own license (The Apache License 2.0), as included in file named LICENSE;
+
+Codes that are writen by me (ExTEnS10N), are released into public domain.

@@ -11,28 +11,18 @@
  * limitations under the License.
  */
 
-// Note: this is never used, but necessary to prevent a bug in Firefox
-// (https://bugzilla.mozilla.org/show_bug.cgi?id=1702191) where it collects
-// Web Workers that have a shared WebAssembly memory with the main thread,
-// but are not explicitly rooted via a `Worker` instance.
-//
-// By storing them in a variable, we can keep `Worker` objects around and
-// prevent them from getting GC-d.
-let _workers;
 
-export async function startWorkers(module, memory, builder) {
-  if (builder.numThreads() === 0) {
-    throw new Error(`num_threads must be > 0.`);
-  }
+export async function startWorkers(module, memory, length, receiver, shareObject, objSenders) {
 
   const workerInit = {
     module,
     memory,
-    receiver: builder.receiver()
+    receiver,
+    shareObject,
   };
 
-  _workers = await Promise.all(
-    Array.from({ length: builder.numThreads() }, async () => {
+  const workers = await Promise.all(
+    Array.from({ length }, async () => {
       // Self-spawn into a new Worker.
       //
       // TODO: while `new URL('...', import.meta.url) becomes a semi-standard
@@ -45,6 +35,7 @@ export async function startWorkers(module, memory, builder) {
           type: 'module'
         }
       );
+      workerInit["objSender"] = objSenders[i];
       worker.postMessage(workerInit);
       await new Promise(resolve =>
         worker.addEventListener('message', resolve, { once: true })
@@ -52,5 +43,10 @@ export async function startWorkers(module, memory, builder) {
       return worker;
     })
   );
-  builder.build();
+
+  return workers;
+}
+
+export const wasmAddr = (addr) => {
+  return addr
 }
