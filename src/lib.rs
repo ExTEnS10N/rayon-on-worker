@@ -41,9 +41,6 @@
          receiver: *const Receiver<ThreadBuilder>,
          share_object: &JsValue, obj_senders: &js_sys::Array
      ) -> JsValue;
- 
-     #[wasm_bindgen(js_name = wasmAddr)]
-     pub fn wasm_addr_s(sender: *const Sender<JsValue>) -> JsValue;
  }
  
  #[wasm_bindgen]
@@ -105,7 +102,7 @@
          for _ in 0..self.num_workers {
              let (obj_sender, obj_receiver) = bounded(1);
              let obj_sender_addr: *const Sender<JsValue> = &obj_sender;
-             array.push(&wasm_addr_s(obj_sender_addr));
+             array.push(&(obj_sender_addr.into()));
              self.obj_senders.push(obj_sender);
              self.obj_receivers.push(WasmReceiver::new(obj_receiver));
          }

@@ -46,7 +46,3 @@ export async function startWorkers(module, memory, length, receiver, shareObject
 
   return workers;
 }
-
-export const wasmAddr = (addr) => {
-  return addr
-}
