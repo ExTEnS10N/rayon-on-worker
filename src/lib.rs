@@ -21,7 +21,6 @@
  
  use crossbeam_channel::RecvError;
  use crossbeam_channel::{bounded, Receiver, Sender};
- use js_sys::Promise;
  use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder};
  use wasm_bindgen::prelude::*;
  use wasm_bindgen::JsValue;

@@ -14,8 +14,6 @@ So here goes the fork, which aims to let me use the rayon as flexible as it orig
 
 - **As long as it works for me, everything is ok!**
 
-- All codes written by me are released to public domain, and fallbacks to the license of origin repo if applicable.
-
 # Overview
 
 `rayon-on-worker` is an adapter for enabling [Rayon](https://github.com/rayon-rs/rayon)-based concurrency on the Web with WebAssembly (via [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen), Web Workers and SharedArrayBuffer support).
@@ -235,4 +233,4 @@ wasmPkg.nowCallAnyExportedFuncs();
 
 As a forked repository, using everything from the origin repo must follow their own license (The Apache License 2.0), as included in file named LICENSE;
 
-Codes that are writen by me (ExTEnS10N), are released into public domain, and fallbacks to the license of origin repo if applicable.
+Codes that are writen by me (ExTEnS10N), are BSD-0-Clause licensed, and fallbacks to the license of origin repo if applicable.
