@@ -12,9 +12,9 @@ So here goes the fork, which aims to let me use the rayon as flexible as it orig
 
 - Due to personally lack of time, I won't make any pull request, nor publish to crates.io.
 
-- **As if it works for me, everything is ok!**
+- **As long as it works for me, everything is ok!**
 
-- All codes written by me are released to public domain.
+- All codes written by me are released to public domain, and fallbacks to the license of origin repo if applicable.
 
 # Overview
 
@@ -235,4 +235,4 @@ wasmPkg.nowCallAnyExportedFuncs();
 
 As a forked repository, using everything from the origin repo must follow their own license (The Apache License 2.0), as included in file named LICENSE;
 
-Codes that are writen by me (ExTEnS10N), are released into public domain.
+Codes that are writen by me (ExTEnS10N), are released into public domain, and fallbacks to the license of origin repo if applicable.
