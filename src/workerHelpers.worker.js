@@ -21,8 +21,12 @@
 // and temporary bugs so that you don't need to deal with them in your code.
 import initWbg, { wbg_rayon_start_worker } from '../../../';
 
-onmessage = async ({ data: { module, memory, receiver, shareObject, objSender } }) => {
+onmessage = async ({ data: { module, memory, receiver, global, shareObject, objSender } }) => {
   await initWbg(module, memory);
   postMessage(true);
-  wbg_rayon_start_worker(receiver, shareObject, objSender);
+  if (global) {
+    wbg_rayon_start_worker(receiver);
+  } else {
+    wbg_rayon_start_worker(receiver, shareObject, objSender);
+  }
 };

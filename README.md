@@ -4,15 +4,17 @@ I can not postMessage to those workers since the rayon run loop will never stop 
 
 Whenever I need to send some JS Object across thread, it is just impossible, since those objects can only be sent via postMessage and not SharedArrayBuffer.
 
-Using the origin wasm-bindgen-rayon will totally limits the whole application function to some specific scenes that we can only do cpu calculations, and other types of multithread tasks will become impossible to run.
+What's more, it even yet to support console_error_panic_hook, making it harder to debug error occured on web workers. 
 
-So here goes the fork, which aims to let me use the rayon as flexible as it originally is.
+So here goes the fork, which aims to let me use the rayon as flexible as it originally is, just NOW.
 
 # Statements
 
 - Due to personally lack of time, I won't make any pull request, nor publish to crates.io.
 
 - **As long as it works for me, everything is ok!**
+
+- The test and demo, and maybe part of this document are not yet upated to adapt to latest changes, use at your own risk!
 
 # Overview
 
@@ -34,6 +36,7 @@ So here goes the fork, which aims to let me use the rayon as flexible as it orig
     - [Usage with Parcel](#usage-with-parcel)
     - [Usage with Rollup](#usage-with-rollup)
     - [Usage without bundlers](#usage-without-bundlers)
+  - [Enable console_error_panic_hook](#enable-console_error_panic_hook)
   - [Feature detection](#feature-detection)
 - [License](#license)
 
@@ -72,14 +75,15 @@ wasm-bindgen-futures = "0.4.42"
 rayon-on-worker = { path = "path/to/rayon-on-worker" }
 ```
 
-Then, reexport the `init_thread_pool` function:
+Then, init the global thread pool to get prepared for rayon's parallel iterators.
 
 ```rust
 let mut workers_builder = WebWorkersBuilder::new()
   .num_workers(16);
-let _workers = workers_builder.build().await;
+let _workers = workers_builder.build_global().await;
 let pool = ThreadPoolBuilder::new()
-    .build_on_workers(&mut workers_builder).unwrap_throw();
+    .build_on_workers_global(&mut workers_builder).unwrap_throw();
+// don't drop the workers and pool if you want to keep using rayon's par_iter
 ```
 
 ## Using Rayon
@@ -205,6 +209,16 @@ If you want to build this library for usage without bundlers, enable the `no-bun
 ```toml
 rayon-on-worker = { path = "path/to/rayon-on-worker", features = ["no-bundler"] }
 ```
+
+## Enable console_error_panic_hook
+
+You may encounter `RuntimeError: unreachable executed`, without any further detail, even if you've use console_error_panic_hook in your main thread, because you need to get it enabled in other thread too!
+To do so, simply add the feature flag `console-panic` to your cargo.toml, like:
+
+``` toml
+rayon-on-worker = { path = "path/to/rayon-on-worker", features = ["console-panic"] }
+```
+Now i will hook the panic on other threads for you, but you still need to manage your panic hook on your main thread.
 
 ## Feature detection
 

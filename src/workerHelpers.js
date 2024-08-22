@@ -12,12 +12,13 @@
  */
 
 
-export async function startWorkers(module, memory, length, receiver, shareObject, objSenders) {
+export async function startWorkers(module, memory, length, receiver, global, shareObject, objSenders) {
 
   const workerInit = {
     module,
     memory,
     receiver,
+    global,
     shareObject,
   };
 
@@ -35,7 +36,9 @@ export async function startWorkers(module, memory, length, receiver, shareObject
           type: 'module'
         }
       );
-      workerInit["objSender"] = objSenders[i];
+      if(!global) {
+        workerInit["objSender"] = objSenders[i];
+      }
       worker.postMessage(workerInit);
       await new Promise(resolve =>
         worker.addEventListener('message', resolve, { once: true })

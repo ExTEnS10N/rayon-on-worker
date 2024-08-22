@@ -29,12 +29,16 @@ function waitForMsgType(target, type) {
 // messages on the page.
 waitForMsgType(self, 'wasm_bindgen_worker_init').then(async data => {
   const pkg = await import(data.mainJS);
-  await pkg.default(data.module, data.memory);
+  await pkg.default(data);
   postMessage({ type: 'wasm_bindgen_worker_ready' });
-  pkg.wbg_rayon_start_worker(data.receiver, data.shareObject, data.objSender);
+  if (data.global) {
+    pkg.wbg_rayon_start_global_worker(data.receiver);
+  } else {
+    pkg.wbg_rayon_start_worker(data.receiver, data.shareObject, data.objSender);
+  }
 });
 
-export async function startWorkers(module, memory, mainJS, length, receiver, shareObject, objSenders) {
+export async function startWorkers(module, memory, mainJS, length, receiver, global, shareObject, objSenders) {
 
   const workerInit = {
     type: 'wasm_bindgen_worker_init',
@@ -42,6 +46,7 @@ export async function startWorkers(module, memory, mainJS, length, receiver, sha
     memory,
     receiver,
     mainJS,
+    global,
     shareObject,
   };
 
@@ -57,7 +62,9 @@ export async function startWorkers(module, memory, mainJS, length, receiver, sha
       const worker = new Worker(url, {
         type: 'module',
       });
-      workerInit["objSender"] = objSenders[i];
+      if (!global) {
+        workerInit["objSender"] = objSenders[i];
+      }
       worker.postMessage(workerInit);
       await waitForMsgType(worker, 'wasm_bindgen_worker_ready');
       URL.revokeObjectURL(url);
